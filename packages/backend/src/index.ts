@@ -31,6 +31,11 @@ import search from './plugins/search';
 import { PluginEnvironment } from './types';
 import { ServerPermissionClient } from '@backstage/plugin-permission-node';
 import { DefaultIdentityClient } from '@backstage/plugin-auth-node';
+import {
+      DefaultGithubCredentialsProvider,
+      ScmIntegrations,
+} from '@backstage/integration';
+import { Octokit } from '@octokit/rest';
 
 function makeCreateEnv(config: Config) {
   const root = getRootLogger();
@@ -93,6 +98,35 @@ async function main() {
   apiRouter.use('/techdocs', await techdocs(techdocsEnv));
   apiRouter.use('/proxy', await proxy(proxyEnv));
   apiRouter.use('/search', await search(searchEnv));
+
+
+  apiRouter.use('/rate_limit', async (_req, res) => {
+    const integrations = ScmIntegrations.fromConfig(config);
+    const githubCredentialsProvider =
+        DefaultGithubCredentialsProvider.fromIntegrations(integrations);
+    const host = "github.com"
+    const owner = "ResultadosDigitais"
+    const repo = "backstage"
+    const integrationConfig = integrations.github.byHost(host)?.config;
+    if(!integrationConfig) throw new Error("Github not configured")
+
+    const { token: credentialProviderToken } =
+        await githubCredentialsProvider.getCredentials({
+          url: `https://${host}/${encodeURIComponent(owner)}/${encodeURIComponent(
+              repo,
+          )}`,
+        });
+
+    const octokitOptions = {
+      auth: credentialProviderToken,
+      baseUrl: integrationConfig.apiBaseUrl,
+      previews: ['nebula-preview'],
+    };
+
+    const client = new Octokit(octokitOptions);
+    const result = await client.request('GET /rate_limit', {})
+    res.json(result.data)
+  })
 
   // Add backends ABOVE this line; this 404 handler is the catch-all fallback
   apiRouter.use(notFoundHandler());
